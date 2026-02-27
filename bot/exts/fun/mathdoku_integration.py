@@ -15,6 +15,32 @@ CROSS_EMOJI = "\u274c"  # "\u274e"
 MAGNIFYING_EMOJI = "🔍"
 PARTY_EMOJI = "🎉"
 HINT_EMOJI = "💡"
+RULE_EMOJI = '📕'
+mathdoku_rules = """Rules for Playing Mathdoku
+
+The numbers you can enter on the board depend on the size of the board you selected. If you choose an n × n
+board, you may use the numbers 1, 2, …, n. For example, on a 3 × 3 board you can use the numbers 1, 2, and 3.
+
+The board is divided into cages, which are groups of squares outlined with a thick border. In the top-left
+corner of each cage, a target number and a mathematical operation (+, −, ×, ÷) are shown. The numbers you
+place in that cage must combine (using the indicated operation) to produce the target number. The operation
+may be applied in any order.
+
+Also note the following rules:
+
+1. A number may appear at most once in each row and at most once in each column.
+2. A cage with one square must contain the target number shown in its corner.
+3. A number may be repeated within a cage, as long as the repeats are not in the same row or column.
+
+The emojis attached to the board have different functions as well:
+
+🔍 Check: This emoji only appears when the board is full. When pressed, it checks whether the board's conditions are fulfilled. If they are, the board turns green and a victory message is shown. If not, the cages that are not fulfilled turn red.
+
+💡 Hint: This emoji provides a helpful hint to assist the player in solving the puzzle. It has a cooldown of 3 minutes.
+
+📕 Rules: This emoji displays the rules of the Mathdoku game.
+"""
+
 log = get_logger(__name__)
 
 
@@ -29,6 +55,8 @@ class Mathdoku(commands.Cog):
         self.player_id = None
         self.board = None  # The message that the board is posten on
         self.guess_count = 0
+        self.rules_msg_exists = False
+        self.rules_msg = None
 
     @commands.group(name="Mathdoku", aliases=("md",), invoke_without_command=True)
     async def mathdoku_group(self, ctx: commands.Context) -> None:
@@ -75,6 +103,7 @@ class Mathdoku(commands.Cog):
             "Type the square and what number you want to input. Format it like this: A1 3\nType `end` to end game."
         )
 
+        await self.board.add_reaction(RULE_EMOJI)
         await self.board.add_reaction(HINT_EMOJI)
 
         while self.playing is True:
@@ -115,12 +144,16 @@ class Mathdoku(commands.Cog):
             emoji = str(reaction.emoji)
             if self.player_id != user.id:  # reaction by wrong player
                 await self.board.remove_reaction(emoji, user)
+            if self.rules_msg_exists:
+                await self.rules_msg.delete()
+                self.rules_msg_exists = False
+                self.rules_msg = None
             if emoji == MAGNIFYING_EMOJI:
                 await self.magnifying_handler(ctx=ctx, user=user)
             elif emoji == HINT_EMOJI:
                 await self.hint_handler(ctx=ctx, user=user)
-            elif emoji == "rules":
-                pass
+            elif emoji == RULE_EMOJI:
+                await self.rules_handler(ctx=ctx, user=user)
             else:  # any other emoji
                 await self.board.remove_reaction(emoji, user)
 
@@ -130,7 +163,10 @@ class Mathdoku(commands.Cog):
             if not valid_match:
                 await result.add_reaction(CROSS_EMOJI)
                 return
-
+            if self.rules_msg_exists:
+                await self.rules_msg.delete()
+                self.rules_msg_exists = False
+                self.rules_msg = None
             try:
                 await result.delete()
             except Exception:
@@ -179,12 +215,13 @@ class Mathdoku(commands.Cog):
             result = self.grid.board_filled_handler()  # check win and update img
             file = discord.File(self.grid._generate_image(), filename="mathdoku.png")
             await self.board.edit(content=None, attachments=[file])
-            if result:  # WIN
+
+            if result: # WIN
                 await self.board.add_reaction(PARTY_EMOJI)
                 await ctx.send(PARTY_EMOJI + " Congrats! You WON " + PARTY_EMOJI)
                 self.playing = False
             return
-        self.bot.loop.create_task(self.board.remove_reaction(MAGNIFYING_EMOJI, user))
+        await self.board.remove_reaction(MAGNIFYING_EMOJI, user)
 
     async def hint_handler(self, ctx, user) -> None:
         """Handle hint request via 💡 reaction."""
@@ -198,6 +235,11 @@ class Mathdoku(commands.Cog):
         else:
             await ctx.send(f"Hint: {result['guess']}")
 
+    async def rules_handler(self, ctx, user) -> None:
+        """Handle rules request via 📕 reaction."""
+        await self.board.remove_reaction(RULE_EMOJI, user)
+        self.rules_msg = await ctx.send(mathdoku_rules)
+        self.rules_msg_exists = True
 
     async def resent_message(self, ctx):
         await self.board.delete()
